@@ -5,13 +5,14 @@ import path from "path";
 import axios from "axios";
 import { CookieJar } from "tough-cookie";
 import { wrapper } from "axios-cookiejar-support";
+import os from "os"; // Import the os module
 
 // Function to sanitize the filename
 function sanitizeFilename(filename) {
   return filename.replace(/[<>:"\/\\|?*]+/g, "_"); // Replace invalid characters with underscores
 }
 
-async function downloadFile(downloadLink, lessonFolder, fileName) {
+async function downloadFile(downloadLink, lessonFolder, fileName, stats) {
   try {
     const jar = new CookieJar();
     const axiosInstance = wrapper(axios.create({ jar }));
@@ -50,18 +51,26 @@ async function downloadFile(downloadLink, lessonFolder, fileName) {
     fileResponse.data.pipe(dest);
 
     dest.on("finish", () => {
-      console.log(`Downloaded: ${filePath}`);
+      stats.filesDownloaded++; // Increment successful download count
     });
 
     dest.on("error", (err) => {
       console.error(`Error writing file: ${err}`);
+      stats.failedDownloads++; // Increment failed download count
     });
   } catch (error) {
     console.error(`Failed to download ${downloadLink}: ${error.message}`);
+    stats.failedDownloads++; // Increment failed download count
   }
 }
 
 async function scrapeExamQuestions() {
+  const stats = {
+    totalLessons: 0, // Count total lessons processed
+    filesDownloaded: 0, // Count total files downloaded
+    failedDownloads: 0, // Count total failed downloads
+  };
+
   const browser = await puppeteer.launch({
     executablePath: "/usr/bin/google-chrome",
   });
@@ -115,8 +124,11 @@ async function scrapeExamQuestions() {
       });
     });
 
+    // Use the user's home directory for a more general path
+    const homeDirectory = os.homedir(); // Get the home directory
     const curriculumFolder = path.join(
-      "/home/f.ahmadi/Desktop/Node-Scraper/",
+      homeDirectory, // Use home directory as base
+      "Node-Scraper",
       "downloads",
       curriculumName
     );
@@ -146,14 +158,20 @@ async function scrapeExamQuestions() {
       const lessonFolder = path.join(curriculumFolder, lessonName);
       fs.mkdirSync(lessonFolder, { recursive: true });
 
-      // Download each file using node-fetch
+      // Download each file
       for (const { href: downloadLink, name: fileName } of downloadLinks) {
         try {
-          await downloadFile(downloadLink, lessonFolder, fileName);
+          await downloadFile(downloadLink, lessonFolder, fileName, stats);
         } catch (error) {
           console.error(`Failed to download ${downloadLink}: ${error.message}`);
+          stats.failedDownloads++; // Increment failed download count
         }
       }
+
+      // Log lesson completion
+      stats.totalLessons++; // Increment total lessons count
+      console.log(`Completed downloading files for lesson: ${lessonName}`);
+      console.log(`Files saved in: ${lessonFolder}`);
       await lessonPage.close();
     }
 
@@ -161,6 +179,12 @@ async function scrapeExamQuestions() {
   }
 
   await browser.close();
+
+  // Log final statistics
+  console.log("Scraping completed!");
+  console.log(`Total lessons processed: ${stats.totalLessons}`);
+  console.log(`Total files downloaded: ${stats.filesDownloaded}`);
+  console.log(`Total failed downloads: ${stats.failedDownloads}`);
 }
 
 // Run the function
